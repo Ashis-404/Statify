@@ -15,7 +15,6 @@ import logger as logger_module
 
 
 CONFIG_FILE = "config.json"
-SERVERS_FILE = "servers.json"
 
 
 def load_config() -> dict:
@@ -34,47 +33,7 @@ def load_config() -> dict:
         sys.exit(1)
 
 
-def load_servers() -> list:
-    """Load servers from servers.json"""
-    try:
-        with open(SERVERS_FILE, 'r') as f:
-            data = json.load(f)
-        
-        servers = data.get("servers", [])
-        print(f"✓ Servers loaded: {len(servers)} server(s)")
-        
-        for server in servers:
-            print(f"  - {server.get('name', 'Unknown')} ({server.get('url', 'N/A')})")
-        
-        return servers
-    except FileNotFoundError:
-        print(f"✗ Servers file not found: {SERVERS_FILE}")
-        print(f"  Please copy {SERVERS_FILE}.example to {SERVERS_FILE} and add your servers")
-        sys.exit(1)
-    except json.JSONDecodeError as e:
-        print(f"✗ Invalid JSON in {SERVERS_FILE}: {e}")
-        sys.exit(1)
-
-
-def initialize_servers_in_db(servers: list):
-    """Add servers to database if not already present"""
-    for server in servers:
-        name = server.get("name")
-        url = server.get("url")
-        
-        if not name or not url:
-            print(f"✗ Invalid server entry (missing name or url): {server}")
-            continue
-        
-        # Check if server already exists
-        existing_servers = db.get_all_servers()
-        server_exists = any(s["name"] == name for s in existing_servers)
-        
-        if not server_exists:
-            db.add_server(name, url)
-
-
-def monitor_servers(config: dict, servers: list, log):
+def monitor_servers(config: dict, log):
     """Main monitoring loop"""
     
     check_interval = config.get("check_interval", 60)
@@ -117,18 +76,18 @@ def monitor_servers(config: dict, servers: list, log):
                 # Print result
                 print(health_checker.format_health_check_result(check_result, server_name))
                 
+                # Get previous status BEFORE logging the new check
+                previous_status = server.get("last_status")
+                current_status = check_result["status"]
+                
                 # Log check to database
                 db.log_check(
                     server_id=server_id,
-                    status=check_result["status"],
+                    status=current_status,
                     response_time=check_result["response_time"],
                     http_status_code=check_result["http_status_code"],
                     error_message=check_result["error"]
                 )
-                
-                # Get previous status
-                previous_status = db.get_last_status(server_id)
-                current_status = check_result["status"]
                 
                 # Detect status transition
                 if previous_status != current_status:
@@ -141,15 +100,21 @@ def monitor_servers(config: dict, servers: list, log):
                         "error": check_result["error"]
                     }
                     
-                    # Send alert
-                    alert_manager.attempt_alert(
-                        config,
-                        server_id,
-                        server_name,
-                        current_status,
-                        alert_details,
-                        cooldown_minutes
-                    )
+                    # Get user email from server record
+                    user_email = server.get("email")
+                    if not user_email:
+                         print(f"  ⚠️ No email configured for server {server_name}. Skipping alert.")
+                    else:
+                        # Send alert
+                        alert_manager.attempt_alert(
+                            config,
+                            server_id,
+                            server_name,
+                            user_email,
+                            current_status,
+                            alert_details,
+                            cooldown_minutes
+                        )
             
             # Print uptime stats
             print("\n📊 Uptime Summary:")
@@ -183,22 +148,12 @@ def main():
     # Load configuration
     config = load_config()
     
-    # Load servers from config file
-    servers = load_servers()
-    
-    if not servers:
-        print("✗ No servers configured")
-        sys.exit(1)
-    
     # Initialize database
     db.init_db()
     
-    # Add servers to database
-    initialize_servers_in_db(servers)
-    
     # Start monitoring loop
     try:
-        monitor_servers(config, servers, log)
+        monitor_servers(config, log)
     except Exception as e:
         print(f"\n✗ Unexpected error: {e}")
         log.error(f"Unexpected error: {e}")

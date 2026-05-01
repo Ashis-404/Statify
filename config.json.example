@@ -5,10 +5,10 @@
     "host": "smtp.gmail.com",
     "port": 587,
     "use_tls": true,
-    "username": "your-email@gmail.com",
+    "username": "ashis9903550174@gmail.com",
     "password": "your-app-password",
-    "from_email": "your-email@gmail.com",
-    "to_email": "recipient@example.com"
+    "from_email": "ashis9903550174@gmail.com",
+    "to_email": "ashis9903550174@gmail.com"
   },
   "alert_cooldown_minutes": 5
 }

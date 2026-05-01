@@ -1,16 +1,1 @@
-{
-  "servers": [
-    {
-      "name": "My Website",
-      "url": "https://example.com"
-    },
-    {
-      "name": "API Server",
-      "url": "https://api.example.com/health"
-    },
-    {
-      "name": "Test Server",
-      "url": "http://localhost:8000"
-    }
-  ]
-}
+{"servers":[]}

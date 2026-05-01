@@ -23,11 +23,19 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
             url TEXT NOT NULL,
+            email TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_check_time TIMESTAMP,
             last_status TEXT CHECK(last_status IS NULL OR last_status IN ('UP', 'DOWN', 'WARNING'))
         )
     """)
+    
+    # Migrate existing database: add email column if it doesn't exist
+    cursor.execute("PRAGMA table_info(servers)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if "email" not in columns:
+        cursor.execute("ALTER TABLE servers ADD COLUMN email TEXT DEFAULT ''")
+        print("✓ Migrated: Added email column to servers table")
     
     # Create monitoring_checks table
     cursor.execute("""
@@ -72,7 +80,7 @@ def get_connection():
         return None
 
 
-def add_server(name: str, url: str) -> Optional[int]:
+def add_server(name: str, url: str, email: str) -> Optional[int]:
     """Add a new server to monitor"""
     conn = get_connection()
     if not conn:
@@ -81,18 +89,61 @@ def add_server(name: str, url: str) -> Optional[int]:
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO servers (name, url) VALUES (?, ?)",
-            (name, url)
+            "INSERT INTO servers (name, url, email) VALUES (?, ?, ?)",
+            (name, url, email)
         )
         conn.commit()
         server_id = cursor.lastrowid
-        print(f"✓ Server added: {name} (ID: {server_id})")
+        print(f"✓ Server added: {name} (ID: {server_id}) - Email: {email}")
         return server_id
     except sqlite3.IntegrityError as e:
         print(f"✗ Server already exists: {name}")
         return None
     except sqlite3.Error as e:
         print(f"✗ Database error adding server: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def delete_server(server_id: int) -> bool:
+    """Delete a server and all its associated records"""
+    conn = get_connection()
+    if not conn:
+        return False
+    
+    try:
+        cursor = conn.cursor()
+        # Delete related monitoring_checks
+        cursor.execute("DELETE FROM monitoring_checks WHERE server_id = ?", (server_id,))
+        # Delete related alerts
+        cursor.execute("DELETE FROM alerts WHERE server_id = ?", (server_id,))
+        # Delete server
+        cursor.execute("DELETE FROM servers WHERE id = ?", (server_id,))
+        
+        conn.commit()
+        print(f"✓ Server deleted: ID {server_id}")
+        return True
+    except sqlite3.Error as e:
+        print(f"✗ Database error deleting server: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_server_by_id(server_id: int) -> Optional[Dict]:
+    """Get a specific server by ID"""
+    conn = get_connection()
+    if not conn:
+        return None
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM servers WHERE id = ?", (server_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except sqlite3.Error as e:
+        print(f"✗ Database error fetching server: {e}")
         return None
     finally:
         conn.close()

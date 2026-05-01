@@ -16,14 +16,15 @@ import database as db
 load_dotenv()
 
 
-def send_email_alert(config: Dict, server_name: str, alert_type: str, 
+def send_email_alert(config: Dict, server_name: str, user_email: str, alert_type: str, 
                      details: Dict) -> bool:
     """
     Send an email alert
     
     Args:
-        config: SMTP configuration dict with keys: host, port, use_tls, username, password_env_var, from_email, to_email
+        config: SMTP configuration dict with keys: host, port, use_tls, username, password_env_var, from_email
         server_name: Name of the server
+        user_email: Email address of the user who owns the server
         alert_type: 'UP' or 'DOWN'
         details: Dict with URL, response_time, error, etc.
     
@@ -38,11 +39,16 @@ def send_email_alert(config: Dict, server_name: str, alert_type: str,
     smtp_config = config["smtp"]
     
     # Validate required SMTP fields (excluding password which we check next)
-    required_fields = ["host", "port", "username", "from_email", "to_email"]
+    required_fields = ["host", "port", "username", "from_email"]
     for field in required_fields:
         if field not in smtp_config:
             print(f"✗ Missing SMTP config field: {field}")
             return False
+    
+    # Validate user email
+    if not user_email:
+        print("✗ User email not provided for alert")
+        return False
             
     # Resolve password (either read direct 'password' field, or read from env via 'password_env_var')
     password = None
@@ -62,7 +68,7 @@ def send_email_alert(config: Dict, server_name: str, alert_type: str,
         # Send email
         msg = MIMEMultipart()
         msg["From"] = smtp_config["from_email"]
-        msg["To"] = smtp_config["to_email"]
+        msg["To"] = user_email
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
         
@@ -77,7 +83,7 @@ def send_email_alert(config: Dict, server_name: str, alert_type: str,
         server.send_message(msg)
         server.quit()
         
-        print(f"✓ Alert email sent for {server_name} ({alert_type})")
+        print(f"✓ Alert email sent to {user_email} for {server_name} ({alert_type})")
         return True
     
     except smtplib.SMTPAuthenticationError:
@@ -158,10 +164,19 @@ def should_send_alert(server_id: int, alert_type: str, cooldown_minutes: int = 5
     return True
 
 
-def attempt_alert(config: Dict, server_id: int, server_name: str, 
+def attempt_alert(config: Dict, server_id: int, server_name: str, user_email: str,
                  alert_type: str, details: Dict, cooldown_minutes: int = 5) -> bool:
     """
     Attempt to send an alert with anti-spam checks and logging
+    
+    Args:
+        config: SMTP configuration
+        server_id: Database server ID
+        server_name: Name of the server
+        user_email: Email address to send alert to
+        alert_type: 'UP' or 'DOWN'
+        details: Alert details dict
+        cooldown_minutes: Minutes to wait before sending another alert
     
     Returns:
         True if alert was sent, False if skipped or failed
@@ -175,7 +190,7 @@ def attempt_alert(config: Dict, server_id: int, server_name: str,
         return False
     
     # Send alert
-    if send_email_alert(config, server_name, alert_type, details):
+    if send_email_alert(config, server_name, user_email, alert_type, details):
         # Log alert
         message = f"{server_name}: {alert_type}"
         db.log_alert(server_id, alert_type, message, datetime.now())
